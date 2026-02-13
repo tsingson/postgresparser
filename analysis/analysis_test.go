@@ -171,6 +171,85 @@ WHERE o.status = 'open'`
 	}
 }
 
+// TestAnalyzeSQLSetClientMinMessages confirms the analysis layer handles SET
+// with grammar-unfriendly log-level tokens gracefully.
+func TestAnalyzeSQLSetClientMinMessages(t *testing.T) {
+	res, err := AnalyzeSQL("SET client_min_messages = warning")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if res == nil {
+		t.Fatalf("expected non-nil result")
+	}
+	if res.Command != SQLCommandUnknown {
+		t.Fatalf("expected UNKNOWN command, got %s", res.Command)
+	}
+}
+
+// TestAnalyzeSQLSetLogLevelRecovery confirms analysis handles SET statements
+// with log-level RHS tokens.
+func TestAnalyzeSQLSetLogLevelRecovery(t *testing.T) {
+	res, err := AnalyzeSQL("SET foo = warning")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if res == nil {
+		t.Fatalf("expected non-nil result")
+	}
+	if res.Command != SQLCommandUnknown {
+		t.Fatalf("expected UNKNOWN command, got %s", res.Command)
+	}
+}
+
+// TestAnalyzeSQLSetClientMinMessagesMalformed verifies malformed client_min_messages
+// statements still return parse errors.
+func TestAnalyzeSQLSetClientMinMessagesMalformed(t *testing.T) {
+	result, err := AnalyzeSQL("SET client_min_messages = warning]")
+	if err == nil {
+		t.Fatalf("expected parse error, got result: %+v", result)
+	}
+	if result != nil {
+		t.Fatalf("expected nil result on parse error")
+	}
+}
+
+// TestAnalyzeSQLInvalidUtilityStatementsReturnError ensures malformed utility SQL
+// is never silently accepted as UNKNOWN.
+func TestAnalyzeSQLInvalidUtilityStatementsReturnError(t *testing.T) {
+	tests := []string{
+		"SET log_min_messages = warning]",
+		"SHOW",
+		"RESET ALL extra",
+	}
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			result, err := AnalyzeSQL(sql)
+			if err == nil {
+				t.Fatalf("expected parse error, got result: %+v", result)
+			}
+			if result != nil {
+				t.Fatalf("expected nil result on parse error")
+			}
+		})
+	}
+}
+
+// TestAnalyzeSQLUtilityMultiStatementFirstStatementBehavior documents current
+// parser contract: AnalyzeSQL parses the first statement and ignores following
+// statements.
+func TestAnalyzeSQLUtilityMultiStatementFirstStatementBehavior(t *testing.T) {
+	result, err := AnalyzeSQL("SET log_min_messages = warning; SELECT 1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result == nil {
+		t.Fatalf("expected non-nil result")
+	}
+	if result.Command != SQLCommandUnknown {
+		t.Fatalf("expected UNKNOWN command, got %s", result.Command)
+	}
+}
+
 // TestAnalyzeSQLParseError verifies that invalid SQL returns an error.
 func TestAnalyzeSQLParseError(t *testing.T) {
 	result, err := AnalyzeSQL("SELECT * FROM (SELECT 1")
